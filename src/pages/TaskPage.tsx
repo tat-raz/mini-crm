@@ -1,0 +1,1 @@
+export default function TaskPage() { return <h1>Задача</h1> }

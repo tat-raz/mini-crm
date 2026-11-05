@@ -1,0 +1,1 @@
+export default function ObjectsPage() { return <h1>Объекты</h1> }

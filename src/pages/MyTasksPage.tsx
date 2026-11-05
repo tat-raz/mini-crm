@@ -1,0 +1,1 @@
+export default function MyTasksPage() { return <h1>Мои задачи</h1> }
