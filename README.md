@@ -1,75 +1,78 @@
-# React + TypeScript + Vite
+# Мини-CRM «Объекты и задачи»
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Тестовое задание: CRM для строительной компании. Постановщик ставит задачи по объектам (стройкам), исполнители берут их в работу и отправляют на проверку.
 
-Currently, two official plugins are available:
+**Стек:** React 19, TypeScript, Vite, Tailwind CSS, React Router, Supabase (Postgres, Auth, RLS). Деплой на Netlify.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Роли
 
-## React Compiler
+| Роль | Что может |
+|---|---|
+| Постановщик | создаёт, редактирует и удаляет объекты и задачи, назначает исполнителя, принимает задачи или возвращает на доработку, видит всё |
+| Исполнитель | видит только свои задачи и объекты, где у него есть задачи; берёт задачу в работу и отправляет на проверку |
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Статусы: Новая → В работе → На проверке → Принята / На доработке → В работе. Другие переходы запрещены базой.
 
-## Expanding the ESLint configuration
+## Как устроена защита
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+Все правила доступа проверяются в базе, а не только в интерфейсе:
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- **RLS-политики** на всех таблицах: исполнитель получает только свои задачи, их историю и объекты, где у него есть задачи.
+- **Права на колонки:** через API нельзя напрямую записать `status`, `author_id`, `created_at`. Автор подставляется базой (`auth.uid()`), статус при создании всегда «Новая».
+- **Смена статуса только через функцию** `change_task_status` (security definer): она проверяет роль, исполнителя и допустимость перехода, требует комментарий при возврате на доработку и сама пишет историю.
+- **История только для чтения:** прав на вставку, изменение и удаление у пользователей нет.
+- **Открытая регистрация отключена**, во фронтенде только публичный ключ. Секретный ключ (`service_role`) не используется ни во фронтенде, ни в репозитории.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Структура
 
 ```
-
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+supabase/
+  migrations/
+    ..._init_schema.sql      таблицы, типы, права на колонки, профиль для нового пользователя
+    ..._rls_policies.sql     политики RLS и функция is_manager()
+    ..._status_workflow.sql  смена статуса с проверкой переходов, история
+  seed.sql                   тестовые данные
+scripts/
+  security-check.mjs         проверка правил доступа напрямую через API
+src/
+  auth/        вход, сессия, профиль с ролью
+  components/  шапка, значок статуса
+  lib/         клиент Supabase, статусы и доступные действия, тексты ошибок
+  pages/       экраны: вход, объекты, объект, задача, мои задачи
 ```
+
+## Запуск локально
+
+1. Установить зависимости:
+   ```bash
+   npm install
+   ```
+2. Создать `.env.local` по образцу `.env.example`, указать URL проекта Supabase и publishable (anon) ключ.
+3. Запустить:
+   ```bash
+   npm run dev
+   ```
+
+## Развернуть базу в новом проекте Supabase
+
+1. Создать проект на supabase.com.
+2. Применить миграции:
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref <ref проекта>
+   npx supabase db push --remote
+   ```
+3. Отключить регистрацию: Authentication → Sign In / Providers → Allow new users to sign up → выключить.
+4. Создать пользователей в Authentication → Users (с Auto Confirm):
+   `manager@minicrm.test`, `executor1@minicrm.test`, `executor2@minicrm.test`.
+5. Выполнить `supabase/seed.sql` в SQL Editor: назначит постановщика, создаст объекты и задачи в разных статусах.
+
+## Проверка безопасности
+
+Скрипт входит под каждым пользователем с публичным ключом и пытается сделать запрещённое: прочитать чужие задачи, сменить статус напрямую, перескочить статус, подделать историю, назначить себя постановщиком и т. д.
+
+```bash
+npm run security-check
+```
+
+Ожидаемый результат: все проверки пройдены (31 из 31).
